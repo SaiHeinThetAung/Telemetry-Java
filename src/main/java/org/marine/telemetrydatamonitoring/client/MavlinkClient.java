@@ -22,9 +22,9 @@ public class MavlinkClient implements Runnable {
     private final TelemetryService telemetryService;
 
     private final String missionPlannerHost = "localhost";
-    private final int missionPlannerPort = 14550;
-    private final int udpPort = 14557; // UDP Port for MAVLink messages
-
+    private final int missionPlannerPort = 14550; // Self
+//    private final int udpPort = 14556; // UDP Port for MAVLink messages
+//    private final int udpPort = 14557; // UDP Port for MAVLink messages
     private final Map<String, Object> telemetryData = new HashMap<String, Object>() {{
         put("lat", 0.0);
         put("lon", 0.0);
@@ -69,36 +69,36 @@ public class MavlinkClient implements Runnable {
         new Thread(this::startTcpListener).start();
 
         // Start UDP listener in the main thread
-        startUdpListener();
+//        startUdpListener();
     }
 
-    private void startUdpListener() {
-        try (DatagramSocket datagramSocket = new DatagramSocket(udpPort)) {
-            System.out.println("Listening for MAVLink messages on UDP port " + udpPort);
-
-            byte[] buffer = new byte[2048];
-            DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-
-            while (true) {
-                datagramSocket.receive(packet);
-                System.out.println("Received UDP packet from " + packet.getAddress() + ":" + packet.getPort());
-
-                try (InputStream inputStream = new ByteArrayInputStream(packet.getData(), packet.getOffset(), packet.getLength())) {
-                    MavlinkConnection connection = MavlinkConnection.create(inputStream, null);
-                    MavlinkMessage<?> mavlinkMessage = connection.next();
-                    if (mavlinkMessage != null) {
-                        processTelemetryMessage(mavlinkMessage);
-                    }
-                } catch (Exception e) {
-                    if (!"End of stream".equals(e.getMessage())) {
-                        System.err.println("Error processing UDP MAVLink message: " + e.getMessage());
-                    }
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("Error in UDP Listener: " + e.getMessage());
-        }
-    }
+//    private void startUdpListener() {
+//        try (DatagramSocket datagramSocket = new DatagramSocket(udpPort)) {
+//            System.out.println("Listening for MAVLink messages on UDP port " + udpPort);
+//
+//            byte[] buffer = new byte[2048];
+//            DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+//
+//            while (true) {
+//                datagramSocket.receive(packet);
+//                System.out.println("Received UDP packet from " + packet.getAddress() + ":" + packet.getPort());
+//
+//                try (InputStream inputStream = new ByteArrayInputStream(packet.getData(), packet.getOffset(), packet.getLength())) {
+//                    MavlinkConnection connection = MavlinkConnection.create(inputStream, null);
+//                    MavlinkMessage<?> mavlinkMessage = connection.next();
+//                    if (mavlinkMessage != null) {
+//                        processTelemetryMessage(mavlinkMessage);
+//                    }
+//                } catch (Exception e) {
+//                    if (!"End of stream".equals(e.getMessage())) {
+//                        System.err.println("Error processing UDP MAVLink message: " + e.getMessage());
+//                    }
+//                }
+//            }
+//        } catch (Exception e) {
+//            System.err.println("Error in UDP Listener: " + e.getMessage());
+//        }
+//    }
 
     private void startTcpListener() {
         try (Socket socket = new Socket(missionPlannerHost, missionPlannerPort);
