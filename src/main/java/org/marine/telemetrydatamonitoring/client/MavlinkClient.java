@@ -23,8 +23,9 @@ public class MavlinkClient implements Runnable {
 
     private final String missionPlannerHost = "localhost";
     private final int missionPlannerPort = 14550; // Self
-//    private final int udpPort = 14556; // UDP Port for MAVLink messages
-//    private final int udpPort = 14557; // UDP Port for MAVLink messages
+    // private final int udpPort = 14556; // UDP Port for MAVLink messages
+    // private final int udpPort = 14557; // Alternate UDP Port for MAVLink messages
+
     private final Map<String, Object> telemetryData = new HashMap<String, Object>() {{
         put("lat", 0.0);
         put("lon", 0.0);
@@ -66,10 +67,10 @@ public class MavlinkClient implements Runnable {
     @Override
     public void run() {
         // Start TCP listener in a separate thread
-         new Thread(this::startTcpListener).start();
+        new Thread(this::startTcpListener).start();
 
-        // Start UDP listener in the main thread
-       //startUdpListener();
+        // Uncomment to start UDP listener
+        // startUdpListener();
     }
 
     /*private void startUdpListener() {
