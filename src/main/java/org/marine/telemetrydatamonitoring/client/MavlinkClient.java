@@ -66,39 +66,39 @@ public class MavlinkClient implements Runnable {
     @Override
     public void run() {
         // Start TCP listener in a separate thread
-        new Thread(this::startTcpListener).start();
+         new Thread(this::startTcpListener).start();
 
         // Start UDP listener in the main thread
-//        startUdpListener();
+       //startUdpListener();
     }
 
-//    private void startUdpListener() {
-//        try (DatagramSocket datagramSocket = new DatagramSocket(udpPort)) {
-//            System.out.println("Listening for MAVLink messages on UDP port " + udpPort);
-//
-//            byte[] buffer = new byte[2048];
-//            DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-//
-//            while (true) {
-//                datagramSocket.receive(packet);
-//                System.out.println("Received UDP packet from " + packet.getAddress() + ":" + packet.getPort());
-//
-//                try (InputStream inputStream = new ByteArrayInputStream(packet.getData(), packet.getOffset(), packet.getLength())) {
-//                    MavlinkConnection connection = MavlinkConnection.create(inputStream, null);
-//                    MavlinkMessage<?> mavlinkMessage = connection.next();
-//                    if (mavlinkMessage != null) {
-//                        processTelemetryMessage(mavlinkMessage);
-//                    }
-//                } catch (Exception e) {
-//                    if (!"End of stream".equals(e.getMessage())) {
-//                        System.err.println("Error processing UDP MAVLink message: " + e.getMessage());
-//                    }
-//                }
-//            }
-//        } catch (Exception e) {
-//            System.err.println("Error in UDP Listener: " + e.getMessage());
-//        }
-//    }
+    /*private void startUdpListener() {
+        try (DatagramSocket datagramSocket = new DatagramSocket(udpPort)) {
+            System.out.println("Listening for MAVLink messages on UDP port " + udpPort);
+
+            byte[] buffer = new byte[2048];
+            DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+
+            while (true) {
+                datagramSocket.receive(packet);
+                System.out.println("Received UDP packet from " + packet.getAddress() + ":" + packet.getPort());
+
+                try (InputStream inputStream = new ByteArrayInputStream(packet.getData(), packet.getOffset(), packet.getLength())) {
+                    MavlinkConnection connection = MavlinkConnection.create(inputStream, null);
+                    MavlinkMessage<?> mavlinkMessage = connection.next();
+                    if (mavlinkMessage != null) {
+                        processTelemetryMessage(mavlinkMessage);
+                    }
+                } catch (Exception e) {
+                    if (!"End of stream".equals(e.getMessage())) {
+                        System.err.println("Error processing UDP MAVLink message: " + e.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Error in UDP Listener: " + e.getMessage());
+        }
+    }*/
 
     private void startTcpListener() {
         try (Socket socket = new Socket(missionPlannerHost, missionPlannerPort);
