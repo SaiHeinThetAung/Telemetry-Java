@@ -18,36 +18,24 @@ public class MavlinkService {
     private InetAddress remoteAddress;
     private int remotePort;
 
-    /**
-     * Establishes a connection to the Mission Planner using the given host and port.
-     *
-     * @param host the IP address of the Mission Planner
-     * @param port the port to connect to
-     */
     public void connect(String host, int port) {
         try {
             logger.info("Attempting to connect to {}:{}", host, port);
 
-            // Create a DatagramSocket for UDP communication
             udpSocket = new DatagramSocket();
             remoteAddress = InetAddress.getByName(host);
             remotePort = port;
 
-            // Set up MavlinkConnection manually (using the socket)
             connection = MavlinkConnection.create(new DatagramInputStream(udpSocket), new DatagramOutputStream(udpSocket));
 
             logger.info("Connected to Mission Planner at {}:{}", host, port);
 
-            // Start listening for telemetry data
             startTelemetryListener();
         } catch (SocketException | UnknownHostException e) {
             logger.error("Connection failed: {}", e.getMessage());
         }
     }
 
-    /**
-     * Starts a separate thread to listen for incoming MAVLink telemetry data.
-     */
     private void startTelemetryListener() {
         new Thread(() -> {
             try {
@@ -63,11 +51,6 @@ public class MavlinkService {
         }, "Telemetry-Listener-Thread").start();
     }
 
-    /**
-     * Processes incoming MAVLink messages.
-     *
-     * @param mavlinkMessage the MAVLink message to process
-     */
     private void processTelemetryMessage(MavlinkMessage<?> mavlinkMessage) {
         Object payload = mavlinkMessage.getPayload();
         if (payload instanceof Heartbeat) {
@@ -78,9 +61,6 @@ public class MavlinkService {
         }
     }
 
-    /**
-     * Disconnects from the Mission Planner and cleans up resources.
-     */
     public void disconnect() {
         try {
             if (udpSocket != null && !udpSocket.isClosed()) {
@@ -92,9 +72,6 @@ public class MavlinkService {
         }
     }
 
-    /**
-     * Custom DatagramInputStream for reading UDP data.
-     */
     private static class DatagramInputStream extends java.io.InputStream {
         private final DatagramSocket socket;
         private final byte[] buffer = new byte[1024];
@@ -107,13 +84,10 @@ public class MavlinkService {
         @Override
         public int read() throws IOException {
             socket.receive(packet);
-            return packet.getData()[0]; // Just return the first byte of the packet
+            return packet.getData()[0];
         }
     }
 
-    /**
-     * Custom DatagramOutputStream for sending UDP data.
-     */
     private static class DatagramOutputStream extends java.io.OutputStream {
         private final DatagramSocket socket;
         private final InetAddress remoteAddress;
