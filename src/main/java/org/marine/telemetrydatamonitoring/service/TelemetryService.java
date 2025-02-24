@@ -6,7 +6,7 @@ import org.springframework.stereotype.Service;
 public class TelemetryService {
     private String latestTelemetryData = "No data available";
 
-    public synchronized void updateTelemetryData(String telemetryData) {
+    public synchronized void outputTelemetryData(String telemetryData) {
         this.latestTelemetryData = telemetryData;
     }
 
