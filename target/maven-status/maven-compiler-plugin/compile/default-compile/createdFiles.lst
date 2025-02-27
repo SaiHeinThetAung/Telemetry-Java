@@ -1,0 +1,8 @@
+org\marine\telemetrydatamonitoring\controller\TelemetryController.class
+org\marine\telemetrydatamonitoring\service\MavlinkService.class
+org\marine\telemetrydatamonitoring\TelemetryDataMonitoringApplication.class
+org\marine\telemetrydatamonitoring\service\TelemetryService.class
+org\marine\telemetrydatamonitoring\controller\MavlinkController.class
+org\marine\telemetrydatamonitoring\service\MavlinkService$DatagramOutputStream.class
+org\marine\telemetrydatamonitoring\service\MavlinkService$DatagramInputStream.class
+org\marine\telemetrydatamonitoring\client\MavlinkClient.class
