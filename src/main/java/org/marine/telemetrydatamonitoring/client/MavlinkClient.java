@@ -6,7 +6,6 @@ import io.dronefleet.mavlink.ardupilotmega.Wind;
 import io.dronefleet.mavlink.common.*;
 import org.marine.telemetrydatamonitoring.service.TelemetryService;
 import org.springframework.stereotype.Component;
-
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -18,7 +17,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-
+import java.io.FileWriter;
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 @Component
 public class MavlinkClient implements Runnable {
     private final TelemetryService telemetryService;
@@ -27,7 +31,7 @@ public class MavlinkClient implements Runnable {
     private final int missionPlannerPort = 14550;
     private final int udpPort = 14557;
     private final int udpPort2 = 14558;
-
+    private  int count ;
     private final LinkedHashMap<String, Object> telemetryData = new LinkedHashMap<>();
     private final List<Map<String, Object>> waypoints = new ArrayList<>();  // Store waypoints
     private Double prevLat = null, prevLon = null;
@@ -143,7 +147,9 @@ public class MavlinkClient implements Runnable {
             MavlinkConnection connection = MavlinkConnection.create(inputStream, outputStream);
 
             // Send a mission request for item index 0 (requesting first mission item)
-            sendMissionRequestInt(connection, 0);
+            for (int i=0; i< 14; i++) {
+                sendMissionRequestInt(connection, i);
+            }
             while (true) {
                 MavlinkMessage<?> message = connection.next();
                 if (message != null) {
@@ -153,6 +159,7 @@ public class MavlinkClient implements Runnable {
                     processTelemetryMessage(message);
                 }
             }
+
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -186,12 +193,14 @@ public class MavlinkClient implements Runnable {
             // Add to waypoints list
             waypoints.add(waypoint);
             telemetryData.put("waypoints", waypoints);  // Update telemetry data
+
             // Print the updated waypoints list
             System.out.println("Waypoints List: " + waypoints);
+
             Integer waypointsCount = (Integer) telemetryData.get("waypoints_count");
-            // Request next mission item if available
-            for (int i=1;i < waypointsCount ;i++) {
-                sendMissionRequestInt(mavlinkConnection,i);
+            if (waypointsCount != null && missionItemInt.seq() < waypointsCount - 1) {
+                // Request only the next mission item
+                sendMissionRequestInt(mavlinkConnection, missionItemInt.seq() + 1);
             }
 
         }
@@ -275,17 +284,46 @@ public class MavlinkClient implements Runnable {
 
     private void emitTelemetry() {
         System.out.println("\033[1;34m--- Telemetry Data ---\033[0m");
+
+        // Get current DateTime
+        String timestamp = new SimpleDateFormat("yyyyMMdd_HH'h'mm'm'ss's'").format(new Date());
+
+        // Get GCS IP (replace with actual logic if needed)
+        String gcsIP;
+        try {
+            gcsIP = InetAddress.getLocalHost().getHostAddress();
+        } catch (Exception e) {
+            gcsIP = "UnknownIP";
+        }
+
+        // Get system ID
+        Object sysid = telemetryData.get("sysid");
+        String systemID = (sysid != null) ? sysid.toString() : "UnknownSys";
+
+
+        // Construct filename
+        String filename = String.format("Received_%s_%s_%s_t.log",timestamp,"GCSIP_"+gcsIP, "SYSID_"+systemID);
+
+        // Convert telemetry data to string
+        String logData = telemetryData.toString();
+
+        // Write to log file
+        try (FileWriter fileWriter = new FileWriter(filename, true)) {
+            fileWriter.write(logData + "\n");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        // Print telemetry data to console
         telemetryData.forEach((key, value) -> {
-           // Highlight keys with specific color
-           if (key.contains("out")) {
-               System.out.printf("\033[91m%-20s\033[0m: %s\n", key, value); // Red for battery info
-           } else if (key.contains("al") || key.contains("dist") || key.contains("l")) {
-               System.out.printf("\033[92m%-20s\033[0m: %s\n", key, value); // Green for altitude and distance
+            if (key.contains("out")) {
+                System.out.printf("\033[91m%-20s\033[0m: %s\n", key, value);
+            } else if (key.contains("al") || key.contains("dist") || key.contains("l")) {
+                System.out.printf("\033[92m%-20s\033[0m: %s\n", key, value);
             } else {
-                System.out.printf("\033[97m%-20s\033[0m: %s\n", key, value); // White for other data
+                System.out.printf("%-20s: %s\n", key, value);
             }
         });
-        System.out.println("\033[1;34m----------------------\033[0m\n");
     }
 
     private double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
