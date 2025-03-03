@@ -5,24 +5,19 @@ import io.dronefleet.mavlink.MavlinkMessage;
 import io.dronefleet.mavlink.ardupilotmega.Wind;
 import io.dronefleet.mavlink.common.*;
 import org.marine.telemetrydatamonitoring.service.TelemetryService;
+import org.springframework.objenesis.ObjenesisHelper;
 import org.springframework.stereotype.Component;
-import java.io.ByteArrayInputStream;
-import java.io.InputStream;
-import java.io.OutputStream;
+
+import java.io.*;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.net.Socket;
+import java.text.SimpleDateFormat;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.io.FileWriter;
-import java.io.BufferedWriter;
-import java.io.IOException;
-import java.net.InetAddress;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 @Component
 public class MavlinkClient implements Runnable {
     private final TelemetryService telemetryService;
@@ -41,6 +36,8 @@ public class MavlinkClient implements Runnable {
     private boolean isAirborne = false;
     private double startTimeSeconds;
 
+    private Integer missionCount = 0;
+
     public MavlinkClient(TelemetryService telemetryService) {
         this.telemetryService = telemetryService;
         initializeTelemetryData();
@@ -53,7 +50,7 @@ public class MavlinkClient implements Runnable {
         telemetryData.put("wp_dist", null);
         telemetryData.put("dist_to_home", 0.0);
         telemetryData.put("vertical_speed", 0.0);
-        telemetryData.put("groundspeed", 0.0);
+        telemetryData.put("ground speed", 0.0);
         telemetryData.put("wind_vel", 0.0);
         telemetryData.put("airspeed", 0.0);
         telemetryData.put("roll", 0.0);
@@ -72,7 +69,6 @@ public class MavlinkClient implements Runnable {
         telemetryData.put("ch10out", 0.00);
         telemetryData.put("ch11out", 0.00);
         telemetryData.put("ch12out", 0.00);
-        telemetryData.put("home", 0.00);
         telemetryData.put("waypoints_count", 0);
         telemetryData.put("waypoints", new ArrayList<String>());
     }
@@ -147,12 +143,13 @@ public class MavlinkClient implements Runnable {
             MavlinkConnection connection = MavlinkConnection.create(inputStream, outputStream);
 
             // Send a mission request for item index 0 (requesting first mission item)
-            for (int i=0; i< 14; i++) {
+            for (int i=0; i< 4; i++) {
                 sendMissionRequestInt(connection, i);
             }
             while (true) {
                 MavlinkMessage<?> message = connection.next();
                 if (message != null) {
+
                     int systemId = message.getOriginSystemId();
 //                    startTimeSeconds = System.currentTimeMillis() / 1000.0;
                     telemetryData.put("sysid", systemId);
@@ -177,6 +174,8 @@ public class MavlinkClient implements Runnable {
         int seconds = (int) (timeInAir % 60);
         telemetryData.put("time_in_air_min_sec", String.format("%d.%02d", minutes, seconds));
         if(payload instanceof MissionCurrent missionCurrent) {
+
+            System.out.println(missionCount+"mission current total : " + missionCurrent.total());
             telemetryData.put("waypoints_count",missionCurrent.total());
         }
 
@@ -198,6 +197,7 @@ public class MavlinkClient implements Runnable {
             System.out.println("Waypoints List: " + waypoints);
 
             Integer waypointsCount = (Integer) telemetryData.get("waypoints_count");
+            System.out.println(waypointsCount);
             if (waypointsCount != null && missionItemInt.seq() < waypointsCount - 1) {
                 // Request only the next mission item
                 sendMissionRequestInt(mavlinkConnection, missionItemInt.seq() + 1);
@@ -236,13 +236,11 @@ public class MavlinkClient implements Runnable {
 
         else if (payload instanceof VfrHud vfrHud) {
             telemetryData.put("airspeed", vfrHud.airspeed());
-            telemetryData.put("groundspeed", vfrHud.groundspeed());
+            telemetryData.put("ground speed", vfrHud.groundspeed());
             telemetryData.put("vertical_speed", vfrHud.climb());
         } else if (payload instanceof NavControllerOutput navControllerOutput) {
             telemetryData.put("wp_dist", navControllerOutput.wpDist());
-        } else if (payload instanceof MissionCurrent missionCurrent) {
-            telemetryData.put("waypoints_count", missionCurrent.total());
-        } else if (payload instanceof Attitude attitude) {
+        }  else if (payload instanceof Attitude attitude) {
             telemetryData.put("roll", Math.toDegrees(attitude.roll()));
             telemetryData.put("pitch", Math.toDegrees(attitude.pitch()));
             telemetryData.put("yaw", Math.toDegrees(attitude.yaw()));
@@ -254,6 +252,7 @@ public class MavlinkClient implements Runnable {
         }
         else if (payload instanceof ServoOutputRaw servoOutputRaw) {
             telemetryData.put("ch3out", servoOutputRaw.servo3Raw());
+
             telemetryData.put("ch3percent", String.format("%.2f", ((servoOutputRaw.servo3Raw() - 1000.0) / 1000.0) * 100));
             telemetryData.put("ch9out", servoOutputRaw.servo9Raw());
             telemetryData.put("ch10out", servoOutputRaw.servo10Raw());
