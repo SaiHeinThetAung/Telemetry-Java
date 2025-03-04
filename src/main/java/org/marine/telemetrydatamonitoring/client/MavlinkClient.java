@@ -8,15 +8,13 @@ import org.marine.telemetrydatamonitoring.service.TelemetryService;
 import org.springframework.stereotype.Component;
 
 import java.io.*;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.net.Socket;
+import java.net.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+
 @Component
 public class MavlinkClient implements Runnable {
     private final TelemetryService telemetryService;
@@ -25,18 +23,17 @@ public class MavlinkClient implements Runnable {
     private final int missionPlannerPort = 14550;
     private final int udpPort = 14552;
     private final int udpPort2 = 14558;
-    private  int count ;
+    private int count;
     private final LinkedHashMap<String, Object> telemetryData = new LinkedHashMap<>();
     private final LinkedHashMap<String, Object> mission_count = new LinkedHashMap<>();
     private final List<Map<String, Object>> waypoints = new ArrayList<>();  // Store waypoints
     private Double prevLat = null, prevLon = null;
     private double totalDistance = 0.0;
-    private double homeLat =35.0766961 ;
+    private double homeLat = 35.0766961;
     private double homeLon = 129.0921085;
     private boolean isAirborne = false;
     private double startTimeSeconds;
-
-
+    private boolean isTcpConnected = false;
 
     public MavlinkClient(TelemetryService telemetryService) {
         this.telemetryService = telemetryService;
@@ -87,6 +84,7 @@ public class MavlinkClient implements Runnable {
         new Thread(this::startUdpListener2).start();
         new Thread(this::startTcpListener).start();
     }
+
     private void requestMissionListTcp(Socket socket) {
         try {
             OutputStream outputStream = socket.getOutputStream();
@@ -127,10 +125,9 @@ public class MavlinkClient implements Runnable {
 
         } catch (Exception e) {
             System.err.println("❌ Error requesting Mission Items via TCP: " + e.getMessage());
+            isTcpConnected = false;
         }
     }
-
-
 
     private MavlinkConnection mavlinkConnection;  // Store connection globally
     private void startTcpListener() {
@@ -143,6 +140,8 @@ public class MavlinkClient implements Runnable {
 
             // Step 1: Request mission list
             requestMissionListTcp(socket);
+            // Set TCP connection flag to true if the connection is successful
+            isTcpConnected = true;
 
             int missionCount = 0;  // Store the mission count
 
@@ -169,6 +168,7 @@ public class MavlinkClient implements Runnable {
             e.printStackTrace();
         }
     }
+
     private void startUdpListener() {
         listenForUdpMessages(udpPort);
     }
@@ -197,8 +197,6 @@ public class MavlinkClient implements Runnable {
     }
 
     private void processTelemetryMessage(MavlinkMessage<?> message) {
-
-
         Object payload = message.getPayload();
         double currentTimeSeconds = System.currentTimeMillis() / 1000.0;
         double timeInAir = currentTimeSeconds - startTimeSeconds;
@@ -207,11 +205,11 @@ public class MavlinkClient implements Runnable {
         int minutes = (int) (timeInAir / 60);
         int seconds = (int) (timeInAir % 60);
         telemetryData.put("time_in_air_min_sec", String.format("%d.%02d", minutes, seconds));
-        if(payload instanceof MissionCurrent missionCurrent) {
 
+        if (payload instanceof MissionCurrent missionCurrent) {
             mission_count.put("mission_count", missionCurrent.total());
-            System.out.println("from map count--"+mission_count.get("mission_count"));
-            telemetryData.put("waypoints_count",missionCurrent.total());
+            System.out.println("from map count--" + mission_count.get("mission_count"));
+            telemetryData.put("waypoints_count", missionCurrent.total());
         }
 
         if (payload instanceof MissionItemInt missionItemInt) {
@@ -224,28 +222,22 @@ public class MavlinkClient implements Runnable {
             waypoint.put("mission_lon", missionItemInt.y() / 1e7);
             waypoint.put("mission_alt", missionItemInt.z());
 
-
             // Add to waypoints list
             waypoints.add(waypoint);
             telemetryData.put("waypoints", waypoints);  // Update telemetry data
 
             // Print the updated waypoints list
             System.out.println("Waypoints List: " + waypoints);
-
-//            if (waypointsCount != null && missionItemInt.seq() < waypointsCount - 1) {
-//                // Request only the next mission item
-//                sendMissionRequestInt(mavlinkConnection, missionItemInt.seq() + 1);
-//            }
-
         }
+
         if (payload instanceof GlobalPositionInt globalPositionInt) {
             double currentLat = globalPositionInt.lat() / 1e7;
             double currentLon = globalPositionInt.lon() / 1e7;
-            double currentAlt = globalPositionInt.relativeAlt()/ 1000.0;
-            double distToHome =(calculateDistance(currentLat, currentLon, homeLat, homeLon))*1000.00;
+            double currentAlt = globalPositionInt.relativeAlt() / 1000.0;
+            double distToHome = (calculateDistance(currentLat, currentLon, homeLat, homeLon)) * 1000.00;
 
             if (prevLat != null && prevLon != null) {
-                double distance = (calculateDistance(prevLat, prevLon, currentLat, currentLon))*1000.00;
+                double distance = (calculateDistance(prevLat, prevLon, currentLat, currentLon)) * 1000.00;
                 totalDistance += distance;
                 telemetryData.put("dist_traveled", totalDistance);
             }
@@ -255,8 +247,6 @@ public class MavlinkClient implements Runnable {
             telemetryData.put("lat", currentLat);
             telemetryData.put("lon", currentLon);
             telemetryData.put("alt", currentAlt);
-
-
         }
 
         else if (payload instanceof VfrHud vfrHud) {
@@ -270,43 +260,19 @@ public class MavlinkClient implements Runnable {
             telemetryData.put("pitch", Math.toDegrees(attitude.pitch()));
             telemetryData.put("yaw", Math.toDegrees(attitude.yaw()));
         } else if (payload instanceof SysStatus sysStatus) {
-            telemetryData.put("battery_voltage", sysStatus.voltageBattery() / 1000.0);
-            telemetryData.put("battery_current", sysStatus.currentBattery() / 1000.0);
-        } else if (payload instanceof GpsRawInt gpsRawInt) {
-            telemetryData.put("gps_hdop", gpsRawInt.eph() / 100.0);
-        }
-        else if (payload instanceof ServoOutputRaw servoOutputRaw) {
-            telemetryData.put("ch3out", servoOutputRaw.servo3Raw());
-
-            telemetryData.put("ch3percent", String.format("%.2f", ((servoOutputRaw.servo3Raw() - 1000.0) / 1000.0) * 100));
-            telemetryData.put("ch9out", servoOutputRaw.servo9Raw());
-            telemetryData.put("ch10out", servoOutputRaw.servo10Raw());
-            telemetryData.put("ch11out", servoOutputRaw.servo11Raw());
-            telemetryData.put("ch12out", servoOutputRaw.servo12Raw());
+            telemetryData.put("battery_voltage", sysStatus.voltageBattery());
+            telemetryData.put("battery_current", sysStatus.currentBattery());
         } else if (payload instanceof Wind wind) {
             telemetryData.put("wind_vel", wind.speed());
         }
-
-        // Calculate tot and toh if groundspeed is available and non-zero.
-        Double groundspeed = telemetryData.get("ground speed") instanceof Number
-                ? ((Number) telemetryData.get("ground speed")).doubleValue() : null;
-        Double wp_dist = telemetryData.get("wp_dist") instanceof Number
-                ? ((Number) telemetryData.get("wp_dist")).doubleValue() : null;
-        Double dist_to_home = telemetryData.get("dist_to_home") instanceof Number
-                ? ((Number) telemetryData.get("dist_to_home")).doubleValue() : null;
-
-        if (groundspeed != null && groundspeed > 0) {
-            if (wp_dist != null) {
-                telemetryData.put("tot", Math.round((wp_dist / groundspeed) * 100.0) / 100.0);
-            }
-            if (dist_to_home != null) {
-                telemetryData.put("toh", Math.round((dist_to_home / groundspeed) * 100.0) / 100.0);
-            }
-        }
-        telemetryService.outputTelemetryData(telemetryData.toString());
     }
 
     private void emitTelemetry() {
+        // Only emit telemetry data if TCP is connected
+        if (!isTcpConnected) {
+            System.out.println("❌ TCP connection is not established. Skipping telemetry emission.");
+            return;
+        }
         System.out.println("\033[1;34m--- Telemetry Data ---\033[0m");
 
         // Get current DateTime
@@ -351,13 +317,13 @@ public class MavlinkClient implements Runnable {
     }
 
     private double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
-        double earthRadius = 6371.0; // kilometers
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        final double R = 6371; // Radius of the earth in km
+        double latDistance = Math.toRadians(lat2 - lat1);
+        double lonDistance = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(latDistance / 2) * Math.sin(latDistance / 2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                        Math.sin(lonDistance / 2) * Math.sin(lonDistance / 2);
         double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return earthRadius * c; // Returns distance in kilometers
+        return R * c; // returns the distance in km
     }
 }
