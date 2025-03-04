@@ -5,7 +5,6 @@ import io.dronefleet.mavlink.MavlinkMessage;
 import io.dronefleet.mavlink.ardupilotmega.Wind;
 import io.dronefleet.mavlink.common.*;
 import org.marine.telemetrydatamonitoring.service.TelemetryService;
-import org.springframework.objenesis.ObjenesisHelper;
 import org.springframework.stereotype.Component;
 
 import java.io.*;
@@ -24,19 +23,20 @@ public class MavlinkClient implements Runnable {
 
     private final String missionPlannerHost = "localhost";
     private final int missionPlannerPort = 14550;
-    private final int udpPort = 14557;
+    private final int udpPort = 14552;
     private final int udpPort2 = 14558;
     private  int count ;
     private final LinkedHashMap<String, Object> telemetryData = new LinkedHashMap<>();
+    private final LinkedHashMap<String, Object> mission_count = new LinkedHashMap<>();
     private final List<Map<String, Object>> waypoints = new ArrayList<>();  // Store waypoints
     private Double prevLat = null, prevLon = null;
     private double totalDistance = 0.0;
-    private double homeLat = 35.0766971;
-    private double homeLon = 43.79;
+    private double homeLat =35.0766961 ;
+    private double homeLon = 129.0921085;
     private boolean isAirborne = false;
     private double startTimeSeconds;
 
-    private Integer missionCount = 0;
+
 
     public MavlinkClient(TelemetryService telemetryService) {
         this.telemetryService = telemetryService;
@@ -87,27 +87,88 @@ public class MavlinkClient implements Runnable {
         new Thread(this::startUdpListener2).start();
         new Thread(this::startTcpListener).start();
     }
-    private void sendMissionRequestInt(MavlinkConnection connection, int seq) {
-
+    private void requestMissionListTcp(Socket socket) {
         try {
-            System.out.println("Requesting Mission Item: " + seq); // Debugging
+            OutputStream outputStream = socket.getOutputStream();
+            MavlinkConnection connection = MavlinkConnection.create(null, outputStream);
 
-            MissionRequestInt missionRequestInt = MissionRequestInt.builder()
+            connection.send1(255, 0, MissionRequestList.builder()
                     .targetSystem(1)
                     .targetComponent(1)
-                    .seq(seq)
-                    .build();
+                    .build());
 
-            connection.send2(255, 0, missionRequestInt);
-            System.out.println("MissionRequestInt sent for sequence: " + seq);
+            System.out.println("✅ Mission List request sent via TCP");
 
         } catch (Exception e) {
-            e.printStackTrace();
+            System.err.println("❌ Error requesting Mission List via TCP: " + e.getMessage());
+        }
+    }
+
+    private void requestMissionItemsTcp(Socket socket, int missionCount) {
+        if (missionCount <= 0) {
+            System.err.println("⚠️ No mission items to request via TCP. Skipping...");
+            return;
+        }
+
+        try {
+            OutputStream outputStream = socket.getOutputStream();
+            MavlinkConnection connection = MavlinkConnection.create(null, outputStream);
+
+            for (int i = 0; i < missionCount; i++) {
+                connection.send1(255, 0, MissionRequestInt.builder()
+                        .targetSystem(1)
+                        .targetComponent(1)
+                        .seq(i)
+                        .build());
+
+                System.out.println("✅ Requested Mission Item " + i + " via TCP");
+                Thread.sleep(200);  // Prevent flooding
+            }
+
+        } catch (Exception e) {
+            System.err.println("❌ Error requesting Mission Items via TCP: " + e.getMessage());
         }
     }
 
 
 
+    private MavlinkConnection mavlinkConnection;  // Store connection globally
+    private void startTcpListener() {
+        try (Socket socket = new Socket(missionPlannerHost, missionPlannerPort);
+             InputStream inputStream = socket.getInputStream();
+             OutputStream outputStream = socket.getOutputStream()) {
+
+            MavlinkConnection connection = MavlinkConnection.create(inputStream, outputStream);
+            System.out.println("✅ TCP connection established");
+
+            // Step 1: Request mission list
+            requestMissionListTcp(socket);
+
+            int missionCount = 0;  // Store the mission count
+
+            while (true) {
+                MavlinkMessage<?> message = connection.next();
+                if (message != null) {
+                    int systemId = message.getOriginSystemId();
+                    telemetryData.put("sysid", systemId);
+
+                    // Step 2: Check if we received MISSION_COUNT
+                    if (message.getPayload() instanceof MissionCount) {
+                        MissionCount missionCountMsg = (MissionCount) message.getPayload();
+                        missionCount = missionCountMsg.count();
+                        System.out.println("📌 Received MISSION_COUNT: " + missionCount);
+
+                        // Step 3: Request mission items
+                        requestMissionItemsTcp(socket, missionCount);
+                    }
+
+                    processTelemetryMessage(message);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
     private void startUdpListener() {
         listenForUdpMessages(udpPort);
     }
@@ -134,33 +195,6 @@ public class MavlinkClient implements Runnable {
             e.printStackTrace();
         }
     }
-    private MavlinkConnection mavlinkConnection;  // Store connection globally
-    private void startTcpListener() {
-        try (Socket socket = new Socket(missionPlannerHost, missionPlannerPort);
-             InputStream inputStream = socket.getInputStream();
-             OutputStream outputStream = socket.getOutputStream()) {
-
-            MavlinkConnection connection = MavlinkConnection.create(inputStream, outputStream);
-
-            // Send a mission request for item index 0 (requesting first mission item)
-            for (int i=0; i< 4; i++) {
-                sendMissionRequestInt(connection, i);
-            }
-            while (true) {
-                MavlinkMessage<?> message = connection.next();
-                if (message != null) {
-
-                    int systemId = message.getOriginSystemId();
-//                    startTimeSeconds = System.currentTimeMillis() / 1000.0;
-                    telemetryData.put("sysid", systemId);
-                    processTelemetryMessage(message);
-                }
-            }
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
 
     private void processTelemetryMessage(MavlinkMessage<?> message) {
 
@@ -175,7 +209,8 @@ public class MavlinkClient implements Runnable {
         telemetryData.put("time_in_air_min_sec", String.format("%d.%02d", minutes, seconds));
         if(payload instanceof MissionCurrent missionCurrent) {
 
-            System.out.println(missionCount+"mission current total : " + missionCurrent.total());
+            mission_count.put("mission_count", missionCurrent.total());
+            System.out.println("from map count--"+mission_count.get("mission_count"));
             telemetryData.put("waypoints_count",missionCurrent.total());
         }
 
@@ -189,6 +224,7 @@ public class MavlinkClient implements Runnable {
             waypoint.put("mission_lon", missionItemInt.y() / 1e7);
             waypoint.put("mission_alt", missionItemInt.z());
 
+
             // Add to waypoints list
             waypoints.add(waypoint);
             telemetryData.put("waypoints", waypoints);  // Update telemetry data
@@ -196,37 +232,26 @@ public class MavlinkClient implements Runnable {
             // Print the updated waypoints list
             System.out.println("Waypoints List: " + waypoints);
 
-            Integer waypointsCount = (Integer) telemetryData.get("waypoints_count");
-            System.out.println(waypointsCount);
-            if (waypointsCount != null && missionItemInt.seq() < waypointsCount - 1) {
-                // Request only the next mission item
-                sendMissionRequestInt(mavlinkConnection, missionItemInt.seq() + 1);
-            }
+//            if (waypointsCount != null && missionItemInt.seq() < waypointsCount - 1) {
+//                // Request only the next mission item
+//                sendMissionRequestInt(mavlinkConnection, missionItemInt.seq() + 1);
+//            }
 
         }
         if (payload instanceof GlobalPositionInt globalPositionInt) {
             double currentLat = globalPositionInt.lat() / 1e7;
             double currentLon = globalPositionInt.lon() / 1e7;
-            double currentAlt = globalPositionInt.alt() / 1000.0;
-            double takeoffThreshold = 0.8;
-            if (currentAlt > takeoffThreshold && !isAirborne) {
-                isAirborne = true;
-                startTimeSeconds = System.currentTimeMillis() / 1000.0;
-            } else if (currentAlt <= takeoffThreshold && isAirborne) {
-                isAirborne = false;
-            }
-
-            double distToHome = calculateDistance(currentLat, currentLon, homeLat, homeLon);
+            double currentAlt = globalPositionInt.relativeAlt()/ 1000.0;
+            double distToHome =(calculateDistance(currentLat, currentLon, homeLat, homeLon))*1000.00;
 
             if (prevLat != null && prevLon != null) {
-                double distance = calculateDistance(prevLat, prevLon, currentLat, currentLon);
+                double distance = (calculateDistance(prevLat, prevLon, currentLat, currentLon))*1000.00;
                 totalDistance += distance;
                 telemetryData.put("dist_traveled", totalDistance);
             }
-
-            telemetryData.put("dist_to_home", distToHome);
             prevLat = currentLat;
             prevLon = currentLon;
+            telemetryData.put("dist_to_home", distToHome);
             telemetryData.put("lat", currentLat);
             telemetryData.put("lon", currentLon);
             telemetryData.put("alt", currentAlt);
@@ -263,8 +288,8 @@ public class MavlinkClient implements Runnable {
         }
 
         // Calculate tot and toh if groundspeed is available and non-zero.
-        Double groundspeed = telemetryData.get("groundspeed") instanceof Number
-                ? ((Number) telemetryData.get("groundspeed")).doubleValue() : null;
+        Double groundspeed = telemetryData.get("ground speed") instanceof Number
+                ? ((Number) telemetryData.get("ground speed")).doubleValue() : null;
         Double wp_dist = telemetryData.get("wp_dist") instanceof Number
                 ? ((Number) telemetryData.get("wp_dist")).doubleValue() : null;
         Double dist_to_home = telemetryData.get("dist_to_home") instanceof Number
